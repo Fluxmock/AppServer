@@ -1,61 +1,79 @@
-import {v2 as cloudinary} from "cloudinary";
-import fs from "fs";
-import dotenv from "dotenv"
-
+import { v2 as cloudinary } from "cloudinary";
+import dotenv from "dotenv";
 
 dotenv.config();
 
-const uploadOnCloudinary = async(files) =>{
-    cloudinary.config({
-         cloud_name: process.env.CLOUDINARY_CLOUD_NAME,
-          api_key: process.env.CLOUDINARY_API_KEY,
-          api_secret: process.env.CLOUDINARY_API_SECRET,
-    });
+const cloudinaryConfig = () => {
+  const requiredEnv = [
+    "CLOUDINARY_CLOUD_NAME",
+    "CLOUDINARY_API_KEY",
+    "CLOUDINARY_API_SECRET",
+  ];
 
-    try{
-        if(!Array.isArray(files) || files.length === 0){
-            throw new Error("No valid files provided for upload");
-        }
-
-        const uploadImage = await Promise.all(
-            files.map((file) => {
-                return new Promise((resolve, reject) => {
-                    const uploadStream = cloudinary.uploader_stream(
-                    {resource_type : "image"},
-                    (error, result) => {
-                        if(error) reject(error);
-                        else resolve(result);
-                    }
-                );
-                uploadStream.end(Buffer.from(file));
-             });
-                
-            })
-        );
-
-        return uploadImage;
-    }catch(error){
-        console.log("cloudinary upload error: ", error);
-        return null;
+  for (const key of requiredEnv) {
+    if (!process.env[key]) {
+      throw new Error(`Missing Cloudinary env: ${key}`);
     }
-};
+  }
 
-const deleteFromCloudinary = async (publicID) => {
-    cloudinary.config({
+  cloudinary.config({
     cloud_name: process.env.CLOUDINARY_CLOUD_NAME,
     api_key: process.env.CLOUDINARY_API_KEY,
     api_secret: process.env.CLOUDINARY_API_SECRET,
   });
+};
+
+const uploadOnCloudinary = async (files) => {
+  cloudinaryConfig();
+
+  if (!Array.isArray(files) || files.length === 0) {
+    throw new Error("No valid files provided for upload");
+  }
+
+  const uploadImage = await Promise.all(
+    files.map(async (file) => {
+      if (!file) {
+        throw new Error("Invalid file object for Cloudinary upload");
+      }
+
+      if (file.buffer) {
+        return await new Promise((resolve, reject) => {
+          const uploadStream = cloudinary.uploader.upload_stream(
+            { resource_type: "image" },
+            (error, result) => {
+              if (error) return reject(error);
+              resolve(result);
+            }
+          );
+
+          uploadStream.end(file.buffer);
+        });
+      }
+
+      if (file.path) {
+        return await cloudinary.uploader.upload(file.path, {
+          resource_type: "image",
+        });
+      }
+
+      throw new Error("Uploaded file is missing buffer or path");
+    })
+  );
+
+  return uploadImage;
+};
+
+const deleteFromCloudinary = async (publicID) => {
+  cloudinaryConfig();
 
   try {
-    if (!publicId) return null;
-    // delete the file on cloudinary
-    const response = await cloudinary.uploader.destroy(publicId);
+    if (!publicID) return null;
+    const response = await cloudinary.uploader.destroy(publicID);
     return response;
   } catch (error) {
     console.log("Error While Deleting the file on Cloudinary,", error);
     return null;
   }
-}
+};
 
 export { uploadOnCloudinary, deleteFromCloudinary };

@@ -1,6 +1,9 @@
 import express from "express"
 import cors from "cors"
 import cookieParser from "cookie-parser"
+import authRouter from "./modules/auth/index.js"
+import projectRouter from "./modules/projects/index.js"
+import endpointRouter from "./modules/endpoints/index.js"
 
 const app = express();
 
@@ -14,6 +17,10 @@ app.use(cors({
     origin: process.env.CORS_ORIGIN,
     credentials: true //the browser needs permission to include credentials in cross-origin requests
 }));
+
+app.use("/api/v1/auth", authRouter);
+app.use("/api/v1/project", projectRouter);
+app.use("/api/v1/endpoint", endpointRouter);
 
 export default app;
 

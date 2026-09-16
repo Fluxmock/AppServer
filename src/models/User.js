@@ -4,6 +4,24 @@ import bcrypt from "bcrypt";
 
 const userSchema = new Schema(
   {
+    authProvider : {
+      type : String,
+      enum : ['local', 'google'],
+      default: 'local',
+      required: true
+    },
+    googleId:{
+      type : String
+    },
+    avatar : {
+      type : String
+    },
+    isEmailVerfied : {
+      type : Boolean
+    },
+    lastLoginAt: {
+      type : String
+    },
     username : {
       type : String,
       required : true,
@@ -32,11 +50,10 @@ const userSchema = new Schema(
 );
 
 //before a customer is saved run this function
-userSchema.pre("save", async function(next){
-  if(!this.isModified("password")) return next();
-  this.password = await bcrypt.hash(this.password, 10)
-  next();
-})
+userSchema.pre("save", async function () {
+  if (!this.isModified("password")) return;
+  this.password = await bcrypt.hash(this.password, 10);
+});
 
 userSchema.methods.isPasswordCorrect = async function(password){
   return await bcrypt.compare(password, this.password)

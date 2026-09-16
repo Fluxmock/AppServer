@@ -1,14 +1,14 @@
-const asyncHandler = (responseHandler) => {
+const asyncHandler = (requestHandler) => {
     return async (req, res, next) => {
-        Promise.resolve(
-            requestHandler(req, req, next)
-        ).catch(
-            (err) => next(err)
-        )
-    }
-}
+        try {
+            await requestHandler(req, res, next);
+        } catch (error) {
+            next(error);
+        }
+    };
+};
 
-export default asyncHandler
+export default asyncHandler;
 
 //wrapper for async express route handlers
 //if an asyc controller throws an error automatically pass that error to ecpress's error 
