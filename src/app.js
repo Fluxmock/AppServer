@@ -4,6 +4,7 @@ import cookieParser from "cookie-parser"
 import authRouter from "./modules/auth/index.js"
 import projectRouter from "./modules/projects/index.js"
 import endpointRouter from "./modules/endpoints/index.js"
+import chaosRouter from "./modules/chaosRules/index.js"
 
 const app = express();
 
@@ -15,12 +16,13 @@ app.use(express.static("public"));
 app.use(cookieParser()); //reads the cookie sent by the browser and makes them available throughout
 app.use(cors({
     origin: process.env.CORS_ORIGIN,
-    credentials: true //the browser needs permission to include credentials in cross-origin requests
+    credentials: true //the brhttp://localhost:8000/api/v1/endpoint/6aaae326a5ccf014ddcaa429owser needs permission to include credentials in cross-origin requests
 }));
 
 app.use("/api/v1/auth", authRouter);
 app.use("/api/v1/project", projectRouter);
 app.use("/api/v1/endpoint", endpointRouter);
+app.use("/api/v1/chaos", chaosRouter);
 
 export default app;
 
