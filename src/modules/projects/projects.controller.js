@@ -15,6 +15,7 @@ import {
 //getProjectROutes
 //activate project
 //deactivate project
+//generateProjectAPIkey
 
 const createProject = asyncHandler(async (req, res) => {
    const {projectName} = req.body;

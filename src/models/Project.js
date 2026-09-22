@@ -17,6 +17,12 @@ const projectSchema = new Schema(
       required: true,
       default: true,
     },
+    projectKey : {
+      type : String,
+      required: true,
+      unique: true,
+      index: true,
+    }
   },
   { timestamps: true }
 );

@@ -1,6 +1,12 @@
 import { Project } from "../../models/Project.js"
 import { User } from "../../models/User.js";
 import ApiError from "../../utils/ApiError.js";
+import redisClient from "../../config/redis.js";
+import crypto from "crypto";
+
+const generateProjectKey = () => {
+  return "pk_" + crypto.randomBytes(16).toString("hex");
+};
 
 const projectCreateService = async(projectName, userId) => {
     const normalizedName = projectName.trim();
@@ -13,16 +19,20 @@ const projectCreateService = async(projectName, userId) => {
         throw new ApiError(400, "Project with this name already exists");
     }
 
+    const projectKey = generateProjectKey();
+
     const project = await Project.create({
         userId,
         projectName : normalizedName,
-        isActive: true
+        isActive: true,
+        projectKey,
     });
 
     return {
         _id : project._id,
         projectName : project.projectName,
-        isActive: project.isActive
+        isActive: project.isActive,
+        projectKey: project.projectKey,
     }
 }
 
@@ -34,6 +44,10 @@ const projectDeleteService = async(projectId, userId) => {
     if(!project){
         throw new ApiError(404, "Project not found or not authorized");
     }
+
+    // evict from MockServer cache so deleted project stops serving requests immediately
+    await redisClient.del(`project:key:${project.projectKey}`);
+
     return project;
 }
 
@@ -58,6 +72,9 @@ const activateProjectService = async(projectId, userId) => {
     project.isActive = true;
     await project.save();
 
+    // invalidate MockServer cache so the change reflects immediately
+    await redisClient.del(`project:key:${project.projectKey}`);
+
     return project;
 }
 
@@ -75,6 +92,9 @@ const deactivateProjectService = async(projectId, userId)=>{
 
     project.isActive = false;
     await project.save();
+
+    // invalidate MockServer cache so the change reflects immediately
+    await redisClient.del(`project:key:${project.projectKey}`);
 
     return project;
 }
