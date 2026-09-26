@@ -2,6 +2,9 @@ import mongoose, { mongo, set } from "mongoose";
 import ChaosRuleSet, {RULE_TYPE} from "../../models/ChaosRule.js";
 import ApiResponse from "../../utils/ApiResponse.js";
 import ApiError from "../../utils/ApiError.js";
+import redisClient from "../../config/redis.js";
+
+const CHAOS_RULE_CACHE_TTL = 300;
 
 //deleteRule - single rule
 //activate deactivate single rule
@@ -10,6 +13,29 @@ import ApiError from "../../utils/ApiError.js";
 //what we want to have is 
 //activate deactive all rules at once on the project level
 //activate deavtivate all rules at once on the endpoint level
+//cache the chaosRule to redis
+const getChaosRuleCacheKey = (projectId, endpointId = null) => {
+    if (endpointId) {
+        return `chaos:rules:project:${projectId}:endpoint:${endpointId}`;
+    }
+
+    return `chaos:rules:project:${projectId}`;
+}
+
+const saveChaosRuleToRedis = async (
+    projectId,
+    endpointId,
+    rules
+) => {
+    const cacheKey = getChaosRuleCacheKey(projectId, endpointId);
+
+    await redisClient.set(
+        cacheKey,
+        JSON.stringify(rules),
+        "EX",
+        CHAOS_RULE_CACHE_TTL
+    );
+}
 
 function assertValidRuleType(ruleType){
     if(!RULE_TYPE.includes(ruleType)){
@@ -33,12 +59,15 @@ const upsertRuleService = async({
     isEnabled ,
 }) => {
     const now = new Date();
-    //'rules.$[r].probability': probability --> use to update specific elememt inside the array
-    //positional operator
 
-    //try updating in place first
+    // normalize IDs to ObjectId so MongoDB filter matches correctly
+    const normalizedProjectId = new mongoose.Types.ObjectId(projectId);
+    const normalizedEndpointId = endpointId
+        ? new mongoose.Types.ObjectId(endpointId)
+        : null;
+
     const setFields = {
-        "rule.$[r].updatedAt" : now,
+        "rules.$[r].updatedAt" : now,
     };
     
     if(probability !== undefined){
@@ -46,46 +75,56 @@ const upsertRuleService = async({
     }
 
     if(config !== undefined){
-        setFields["rule.$[r].config"] = config;
+        setFields["rules.$[r].config"] = config;
     }
 
-    if(isEnabled !== isEnabled){
-        setFields["rule.$[r].isEnabled"] = isEnabled;
+    if(isEnabled !== undefined){
+        setFields["rules.$[r].isEnabled"] = isEnabled;
     }
 
+    // try updating existing rule in place first
     const updated = await ChaosRuleSet.findOneAndUpdate(
-        {projectId, endpointId, 'rules.ruleType': ruleType},
+        {projectId: normalizedProjectId, endpointId: normalizedEndpointId, 'rules.ruleType': ruleType},
+        { $set: setFields },
         {
-            $set: setFields,
-        },
-        {arrayFilters : [
-            {'r.ruleType' : ruleType}
-        ], 
-        new : true
+            arrayFilters: [{'r.ruleType': ruleType}], 
+            new: true
         }
-    );
+    ).lean();
 
-    if(updated) return updated;
+    if(updated){
+        await saveChaosRuleToRedis(projectId, endpointId, updated.rules);
+        return updated;
+    }
 
-    //rule doesn;t exist yet in this scope - push it
-    return ChaosRuleSet.findOneAndUpdate(
-        {projectId, endpointId},
+    // rule doesn't exist yet — push it, but guard against duplicate ruleType
+    // $ne check prevents a race condition from inserting two rules of the same type
+    const created = await ChaosRuleSet.findOneAndUpdate(
         {
-            $setOnInsert : {projectId, endpointId},
-            $push : {
+            projectId: normalizedProjectId,
+            endpointId: normalizedEndpointId,
+            "rules.ruleType": { $ne: ruleType },  // ← guard against duplicates
+        },
+        {
+            $setOnInsert: { projectId: normalizedProjectId, endpointId: normalizedEndpointId },
+            $push: {
                 rules: {
                     _id: new mongoose.Types.ObjectId(),
                     ruleType,
                     probability,
                     config,
                     isEnabled,
-                    createdAt : now,
+                    createdAt: now,
                     updatedAt: now,
                 },
             },
         },
-        {upsert : true, new : true}
-    );
+        { upsert: true, new: true }
+    ).lean();
+
+    await saveChaosRuleToRedis(projectId, endpointId, created.rules);
+    console.log("saved to MongoDB and redis!");
+    return created;
 }
 
 const createChaosService = async({
