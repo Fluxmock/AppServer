@@ -3,6 +3,8 @@ import { User } from "../../models/User.js";
 import ApiError from "../../utils/ApiError.js";
 import redisClient from "../../config/redis.js";
 import crypto from "crypto";
+import Endpoint from "../../models/Endpoint.js";
+import { profileEnd } from "console";
 
 const generateProjectKey = () => {
   return "pk_" + crypto.randomBytes(16).toString("hex");
@@ -50,10 +52,10 @@ const projectDeleteService = async(projectId, userId) => {
 
     return project;
 }
-
-const getAllProjectByUserService = async(userId) =>{
-    return await Project.find({ userId }).sort({ createdAt: -1 });
-}
+//same as the getAllProjects by user with the endpoint count
+// const getAllProjectByUserService = async(userId) =>{
+//     return await Project.find({ userId }).sort({ createdAt: -1 });
+// }
 
 const activateProjectService = async(projectId, userId) => {
     const project = await Project.findOne({
@@ -99,10 +101,64 @@ const deactivateProjectService = async(projectId, userId)=>{
     return project;
 }
 
+const getEndpointCountService = async(userId) => {
+    if(!userId) throw new ApiError(400, "userId is required!");
+
+    const projects = await Project.find({userId}).lean();
+    const ids = projects.map((p) => p._id);
+
+    const counts = await Endpoint.aggregate([
+        {
+            $match : {
+                projectId : {$in : ids}
+            }
+        },
+        {
+            $group : {
+                _id : "$projectId",
+                count: {
+                    $sum : 1
+                }
+            }
+        },
+    ]);
+
+    const countMap = new Map(counts.map((c) => [String(c._id), c.count]));
+
+    return projects.map((p) => ({
+    ...p,
+    endpointCount: countMap.get(String(p._id)) ?? 0,
+  }));
+};
+
+const getAllActiveProjectService = async(userId) => {
+    if(!userId) throw new ApiError(400, "userId required!");
+
+    const projects = await Project.find({ userId, isActive: true })
+        .sort({ createdAt: -1 })
+        .lean();
+
+    const ids = projects.map((p) => p._id);
+
+    const counts = await Endpoint.aggregate([
+        { $match: { projectId: { $in: ids } } },
+        { $group: { _id: "$projectId", count: { $sum: 1 } } },
+    ]);
+
+    const countMap = new Map(counts.map((c) => [String(c._id), c.count]));
+
+    return projects.map((p) => ({
+        ...p,
+        endpointCount: countMap.get(String(p._id)) ?? 0,
+    }));
+}
+
 export {
     projectCreateService, 
     projectDeleteService,
-    getAllProjectByUserService,
+    // getAllProjectByUserService,
     activateProjectService,
-    deactivateProjectService
+    deactivateProjectService,
+    getEndpointCountService,
+    getAllActiveProjectService
 }

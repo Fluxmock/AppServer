@@ -201,20 +201,25 @@ const updateChaosService = async({
 
 const setEnabled = async({
     projectId,
-    endpointId,
+    endpointId = null,
     ruleType,
     isEnabled
 }) => {
     assertValidRuleType(ruleType);
+
     const updated = await ChaosRuleSet.findOneAndUpdate(
         {projectId, endpointId, "rules.ruleType" : ruleType},
         {$set : {"rules.$[r].isEnabled" : isEnabled, "rules.$[r].updatedAt" : new Date()}},
         {arrayFilters: [{"r.ruleType" : ruleType}] , new: true}
-    );
+    ).lean();
 
     if(!updated){
         throw new ApiError(404, "ruletype not found in this scope");
     }
+
+    // sync updated rules array back to Redis immediately
+    // so MockServer sees the change without waiting for TTL expiry
+    await saveChaosRuleToRedis(projectId, endpointId, updated.rules);
 
     return updated;
 }
@@ -243,14 +248,19 @@ const deleteChaosService = async({projectId, endpointId = null, ruleType}) => {
         {projectId, endpointId, "rules.ruleType" : ruleType},
         {$pull : {rules : {ruleType}}},
         {new : true}
-    );
+    ).lean();
 
     if(!updated){
         throw new ApiError(404, "ruletype not found in this scope");
     }
 
     if(updated.rules && updated.rules.length === 0){
+        // no rules left — delete the whole RuleSet doc and clear the cache key
         await ChaosRuleSet.deleteOne({_id : updated._id});
+        await redisClient.del(getChaosRuleCacheKey(projectId, endpointId));
+    } else {
+        // rules remain — update cache with the pruned array
+        await saveChaosRuleToRedis(projectId, endpointId, updated.rules);
     }
 
     return updated;

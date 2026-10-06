@@ -5,9 +5,10 @@ import { Project } from "../../models/Project.js";
 import { 
     projectCreateService, 
     projectDeleteService,
-    getAllProjectByUserService,
+    getAllActiveProjectService,
     activateProjectService,
-    deactivateProjectService 
+    deactivateProjectService,
+    getEndpointCountService
 } from "./projects.service.js";
 
 //create project
@@ -49,17 +50,17 @@ const deleteProject = asyncHandler(async (req, res) => {
     )
 });
 
-const getAllProjects = asyncHandler(async(req, res) => {
-    const userId = req.user._id;
-    if(!userId){
-        throw new ApiError("no user found");
-    }
-    const projects = await getAllProjectByUserService(userId);
+// const getAllProjects = asyncHandler(async(req, res) => {
+//     const userId = req.user._id;
+//     if(!userId){
+//         throw new ApiError("no user found");
+//     }
+//     const projects = await getAllProjectByUserService(userId);
 
-    return res.status(200).json(
-        new ApiResponse(200, projects, "Projects fetched successfully")
-    )
-});
+//     return res.status(200).json(
+//         new ApiResponse(200, projects, "Projects fetched successfully")
+//     )
+// });
 
 const activateProject = asyncHandler(async (req, res) => {
     const {projectId} = req.params;
@@ -111,6 +112,11 @@ const deactiavteProject = asyncHandler(async (req, res) => {
     //remove all the logs of this project
     return res.status(200).json(new ApiResponse(200, project, "Project deactivated successfully!"));
 });
+
+const getAllProjects = asyncHandler(async(req, res) => {
+    const counts = await getEndpointCountService(req.user._id);
+    res.status(200).json(new ApiResponse(200, counts, "Endpoint counts fetched!"));
+})
 
 export {
     createProject, 
