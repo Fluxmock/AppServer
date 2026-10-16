@@ -5,7 +5,8 @@ import {
     createProject, 
     deactiavteProject, 
     deleteProject,
-    getAllProjects
+    getAllProjects,
+    getProjectById
 } from "./projects.controller.js";
 
 const router = Router();
@@ -15,5 +16,6 @@ router.route("/delete/:id").delete(verifyJWT, deleteProject);
 router.route("/activate/:projectId").patch(verifyJWT, activateProject);
 router.route("/deactivate/:projectId").patch(verifyJWT, deactiavteProject);
 router.route("/all").get(verifyJWT, getAllProjects);
+router.route("/:id").get(verifyJWT, getProjectById);
 
 export default router;

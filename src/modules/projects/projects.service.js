@@ -153,6 +153,28 @@ const getAllActiveProjectService = async(userId) => {
     }));
 }
 
+const getProjectByIdService = async(projectId, userId) => {
+    if(!projectId) throw new ApiError(400, "projectId required!");
+    if(!userId) throw new ApiError(400, "userId required!");
+
+    const project = await Project.findOne({
+        _id: projectId,
+        userId
+    }).lean();
+
+    if(!project) {
+        throw new ApiError(404, "Project not found or not authorized");
+    }
+
+    // Get endpoint count for this project
+    const endpointCount = await Endpoint.countDocuments({ projectId: project._id });
+
+    return {
+        ...project,
+        endpointCount
+    };
+}
+
 export {
     projectCreateService, 
     projectDeleteService,
@@ -160,5 +182,6 @@ export {
     activateProjectService,
     deactivateProjectService,
     getEndpointCountService,
-    getAllActiveProjectService
+    getAllActiveProjectService,
+    getProjectByIdService
 }

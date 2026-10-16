@@ -8,7 +8,8 @@ import {
     getAllActiveProjectService,
     activateProjectService,
     deactivateProjectService,
-    getEndpointCountService
+    getEndpointCountService,
+    getProjectByIdService
 } from "./projects.service.js";
 
 //create project
@@ -118,10 +119,22 @@ const getAllProjects = asyncHandler(async(req, res) => {
     res.status(200).json(new ApiResponse(200, counts, "Endpoint counts fetched!"));
 })
 
+const getProjectById = asyncHandler(async(req, res) => {
+    const { id } = req.params;
+    const userId = req.user._id;
+    
+    const project = await getProjectByIdService(id, userId);
+    
+    return res.status(200).json(
+        new ApiResponse(200, project, "Project fetched successfully!")
+    );
+});
+
 export {
     createProject, 
     deleteProject,
     getAllProjects,
     activateProject,
-    deactiavteProject
+    deactiavteProject,
+    getProjectById
 }
