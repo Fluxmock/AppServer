@@ -9,7 +9,9 @@ import {
     updateChaosService,
     deleteChaosService,
     activateChaosService,
-    deactivateChaosService
+    deactivateChaosService,
+    getChaosRulesService,
+    getAllProjectChaosRulesService,
 } from "./chaosRules.service.js";
 
 const resolveEndpointId = (req) => {
@@ -117,11 +119,32 @@ const deactivateChaos = asyncHandler(async(req , res) => {
     res.status(200).json(new ApiResponse(200, rule, "deactivated successfully"));
 })
 
+const getChaosRules = asyncHandler(async (req, res) => {
+    const { projectId } = req.params;
+    const endpointId = resolveEndpointId(req);
+
+    if (!projectId) throw new ApiError(400, "projectId is required");
+
+    const rules = await getChaosRulesService({ projectId, endpointId });
+    res.status(200).json(new ApiResponse(200, rules, "Rules fetched successfully"));
+});
+
+// Returns ALL rule sets for a project in one query — used by the Chaos rules page
+const getAllProjectChaosRules = asyncHandler(async (req, res) => {
+    const { projectId } = req.params;
+    if (!projectId) throw new ApiError(400, "projectId is required");
+
+    const ruleSets = await getAllProjectChaosRulesService({ projectId });
+    res.status(200).json(new ApiResponse(200, ruleSets, "All project rules fetched successfully"));
+});
+
 export{
     createChaos,
     deactivateChaos,
     deleteChaos,
     updateChaos,
     activateChaos,
-    upsertRule
+    upsertRule,
+    getChaosRules,
+    getAllProjectChaosRules,
 }

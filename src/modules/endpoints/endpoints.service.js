@@ -1,5 +1,6 @@
 import Endpoint from "../../models/Endpoint.js";
 import { Project } from "../../models/Project.js";
+import ChaosRuleSet from "../../models/ChaosRule.js";
 import redisClient from "../../config/redis.js";
 import ApiError from "../../utils/ApiError.js";
 import asyncHandler from "../../utils/asyncHandler.js";
@@ -137,36 +138,43 @@ const getAllEndpointsService = async (projectId, userId) => {
     throw new ApiError(400, "projectId is required");
   }
 
-  const project = await Project.findOne({
-    _id: projectId,
-    userId,
-  });
-
+  const project = await Project.findOne({ _id: projectId, userId });
   if (!project) {
     throw new ApiError(404, "Project not found or not authorized");
   }
 
-  const projectKey = `project:endpoints:${projectId}`;
-  const cached = await redisClient.get(projectKey);
+  // Always fetch fresh from Mongo so chaosRulesCount is accurate
+  const endpoints = await Endpoint.find({ projectId })
+    .sort({ createdAt: -1 })
+    .lean();
 
-  if (cached) {
-    try {
-      const endpoints = JSON.parse(cached);
-      if (Array.isArray(endpoints)) {
-        return endpoints;
-      }
-    } catch (error) {
-      // fall through to Mongo
-    }
+  if (endpoints.length === 0) return [];
+
+  // Get chaos rules counts for all endpoints in one query
+  const endpointIds = endpoints.map((e) => e._id);
+  const ruleSets = await ChaosRuleSet.find({
+    projectId,
+    endpointId: { $in: endpointIds },
+  }).lean();
+
+  const chaosCountMap = new Map();
+  for (const rs of ruleSets) {
+    const enabledCount = (rs.rules || []).filter((r) => r.isEnabled).length;
+    chaosCountMap.set(String(rs.endpointId), enabledCount);
   }
 
-  const endpoints = await Endpoint.find({ projectId }).sort({ createdAt: -1 });
+  const enriched = endpoints.map((ep) => ({
+    ...ep,
+    chaosRulesCount: chaosCountMap.get(String(ep._id)) ?? 0,
+  }));
 
-  if (endpoints.length > 0) {
-    await redisClient.set(projectKey, JSON.stringify(endpoints));
-  }
+  // Refresh the cache with enriched data
+  await redisClient.set(
+    `project:endpoints:${projectId}`,
+    JSON.stringify(enriched)
+  );
 
-  return endpoints;
+  return enriched;
 };
 
 const configureEndpointService = async ({

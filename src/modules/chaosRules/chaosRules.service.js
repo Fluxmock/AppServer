@@ -35,6 +35,10 @@ const saveChaosRuleToRedis = async (
         "EX",
         CHAOS_RULE_CACHE_TTL
     );
+    
+    // Invalidate project-wide "all" cache so it re-fetches on next read
+    const PROJECT_ALL_KEY = `chaos:rules:project:${projectId}:all`;
+    await redisClient.del(PROJECT_ALL_KEY);
 }
 
 function assertValidRuleType(ruleType){
@@ -262,9 +266,86 @@ const deleteChaosService = async({projectId, endpointId = null, ruleType}) => {
         // rules remain — update cache with the pruned array
         await saveChaosRuleToRedis(projectId, endpointId, updated.rules);
     }
+    
+    // Invalidate project-wide "all" cache so it re-fetches on next read
+    const PROJECT_ALL_KEY = `chaos:rules:project:${projectId}:all`;
+    await redisClient.del(PROJECT_ALL_KEY);
 
     return updated;
 }
+
+const getChaosRulesService = async ({ projectId, endpointId = null }) => {
+    const normalizedProjectId = new mongoose.Types.ObjectId(projectId);
+    const normalizedEndpointId = endpointId
+        ? new mongoose.Types.ObjectId(endpointId)
+        : null;
+
+    // Try Redis cache first
+    const cacheKey = getChaosRuleCacheKey(projectId, endpointId);
+    const cached = await redisClient.get(cacheKey);
+    if (cached) {
+        try {
+            const parsed = JSON.parse(cached);
+            if (Array.isArray(parsed)) return parsed;
+        } catch {
+            // fall through to Mongo
+        }
+    }
+
+    const ruleSet = await ChaosRuleSet.findOne({
+        projectId: normalizedProjectId,
+        endpointId: normalizedEndpointId,
+    }).lean();
+
+    const rules = ruleSet?.rules ?? [];
+
+    if (rules.length > 0) {
+        await saveChaosRuleToRedis(projectId, endpointId, rules);
+    }
+
+    return rules;
+};
+
+/**
+ * Fetch ALL rule sets for a project in a single query.
+ * Returns an array of { endpointId, rules } — one entry per scope.
+ * endpointId is null for project-level rules.
+ * Uses a project-wide Redis cache key so the whole result is one cache read.
+ */
+const getAllProjectChaosRulesService = async ({ projectId }) => {
+    const PROJECT_ALL_KEY = `chaos:rules:project:${projectId}:all`;
+
+    // Single cache read
+    const cached = await redisClient.get(PROJECT_ALL_KEY);
+    if (cached) {
+        try {
+            const parsed = JSON.parse(cached);
+            if (Array.isArray(parsed)) return parsed;
+        } catch {
+            // fall through to Mongo
+        }
+    }
+
+    // Single Mongo query — fetches every scope for this project at once
+    const ruleSets = await ChaosRuleSet.find({
+        projectId: new mongoose.Types.ObjectId(projectId),
+    }).lean();
+
+    const result = ruleSets.map((rs) => ({
+        endpointId: rs.endpointId ? String(rs.endpointId) : null,
+        rules: rs.rules ?? [],
+    }));
+
+    // Cache for same TTL
+    await redisClient.set(
+        PROJECT_ALL_KEY,
+        JSON.stringify(result),
+        "EX",
+        CHAOS_RULE_CACHE_TTL
+    );
+
+    return result;
+};
 
 export {
     upsertRuleService,
@@ -273,5 +354,7 @@ export {
     activateChaosService,
     deactivateChaosService,
     deleteChaosService,
+    getChaosRulesService,
+    getAllProjectChaosRulesService,
 }
 

@@ -4,6 +4,7 @@ import ApiError from "../../utils/ApiError.js";
 import redisClient from "../../config/redis.js";
 import crypto from "crypto";
 import Endpoint from "../../models/Endpoint.js";
+import ChaosRuleSet from "../../models/ChaosRule.js";
 import { profileEnd } from "console";
 
 const generateProjectKey = () => {
@@ -169,9 +170,45 @@ const getProjectByIdService = async(projectId, userId) => {
     // Get endpoint count for this project
     const endpointCount = await Endpoint.countDocuments({ projectId: project._id });
 
+    // Get chaos rules stats
+    const chaosRuleSets = await ChaosRuleSet.find({ projectId: project._id }).lean();
+    
+    let totalRules = 0;
+    let totalProbability = 0;
+    let enabledRulesCount = 0;
+
+    chaosRuleSets.forEach(ruleSet => {
+        if (ruleSet.rules && Array.isArray(ruleSet.rules)) {
+            ruleSet.rules.forEach(rule => {
+                totalRules++;
+                if (rule.isEnabled) {
+                    enabledRulesCount++;
+                    totalProbability += (rule.probability || 0);
+                }
+            });
+        }
+    });
+
+    const averageProbability = enabledRulesCount > 0 
+        ? (totalProbability / enabledRulesCount) 
+        : 0;
+
+    // Get request count for last 24 hours from Redis
+    // Key format: project:<projectId>:requests:count:24h
+    let requestsToday = 0;
+    try {
+        const countStr = await redisClient.get(`project:${projectId}:requests:count:24h`);
+        requestsToday = countStr ? parseInt(countStr, 10) : 0;
+    } catch (err) {
+        console.error("Failed to fetch request count from Redis:", err);
+    }
+
     return {
         ...project,
-        endpointCount
+        endpointCount,
+        chaosRulesCount: totalRules,
+        averageProbability: Math.round(averageProbability * 100) / 100, // round to 2 decimals
+        requestsToday
     };
 }
 

@@ -8,14 +8,19 @@ import {
   activateChaos,
   deactivateChaos,
   upsertRule,
+  getChaosRules,
+  getAllProjectChaosRules,
 } from "./chaosRules.controller.js";
 
 // mergeParams lets this pick up :projectId / :endpointId from wherever it's mounted
 const router = Router({ mergeParams: true });
 
-// // strict create — 409 if the ruleType already exists in this scope
-// router.post("/:projectId/rule", verifyJWT, createChaos);
-// router.post("/:projectId/:endpointId/rule", verifyJWT, createChaos);
+// get ALL rule sets for a project in one shot (must be before /:projectId/:endpointId)
+router.get("/:projectId/all", verifyJWT, getAllProjectChaosRules);
+
+// get all rules for a scope
+router.get("/:projectId", verifyJWT, getChaosRules);
+router.get("/:projectId/:endpointId", verifyJWT, getChaosRules);
 
 // idempotent upsert — replaces if exists, creates if not
 router.put("/:projectId/rule", verifyJWT, upsertRule);
