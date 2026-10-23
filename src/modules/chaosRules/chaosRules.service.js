@@ -2,9 +2,7 @@ import mongoose, { mongo, set } from "mongoose";
 import ChaosRuleSet, {RULE_TYPE} from "../../models/ChaosRule.js";
 import ApiResponse from "../../utils/ApiResponse.js";
 import ApiError from "../../utils/ApiError.js";
-import redisClient from "../../config/redis.js";
-
-const CHAOS_RULE_CACHE_TTL = 300;
+import { invalidateChaosCache } from "../../services/runtimeCache.service.js";
 
 //deleteRule - single rule
 //activate deactivate single rule
@@ -14,32 +12,11 @@ const CHAOS_RULE_CACHE_TTL = 300;
 //activate deactive all rules at once on the project level
 //activate deavtivate all rules at once on the endpoint level
 //cache the chaosRule to redis
-const getChaosRuleCacheKey = (projectId, endpointId = null) => {
-    if (endpointId) {
-        return `chaos:rules:project:${projectId}:endpoint:${endpointId}`;
-    }
-
-    return `chaos:rules:project:${projectId}`;
-}
-
-const saveChaosRuleToRedis = async (
-    projectId,
-    endpointId,
-    rules
-) => {
-    const cacheKey = getChaosRuleCacheKey(projectId, endpointId);
-
-    await redisClient.set(
-        cacheKey,
-        JSON.stringify(rules),
-        "EX",
-        CHAOS_RULE_CACHE_TTL
-    );
-    
-    // Invalidate project-wide "all" cache so it re-fetches on next read
-    const PROJECT_ALL_KEY = `chaos:rules:project:${projectId}:all`;
-    await redisClient.del(PROJECT_ALL_KEY);
-}
+// All chaos writes invalidate the same data-plane cache contract. MockServer
+// rebuilds it from MongoDB with a version check, so stale rule arrays cannot
+// overwrite a newer write or resurrect a deleted rule.
+const synchronizeChaosCache = (projectId, endpointId) =>
+    invalidateChaosCache(projectId, endpointId);
 
 function assertValidRuleType(ruleType){
     if(!RULE_TYPE.includes(ruleType)){
@@ -97,7 +74,7 @@ const upsertRuleService = async({
     ).lean();
 
     if(updated){
-        await saveChaosRuleToRedis(projectId, endpointId, updated.rules);
+        await synchronizeChaosCache(projectId, endpointId);
         return updated;
     }
 
@@ -126,7 +103,7 @@ const upsertRuleService = async({
         { upsert: true, new: true }
     ).lean();
 
-    await saveChaosRuleToRedis(projectId, endpointId, created.rules);
+    await synchronizeChaosCache(projectId, endpointId);
     console.log("saved to MongoDB and redis!");
     return created;
 }
@@ -165,6 +142,7 @@ const createChaosService = async({
             {upsert : true, new : true}
         );
 
+        await synchronizeChaosCache(projectId, endpointId);
         return updated;
     }catch(error){
         if(error.code == 11000){
@@ -200,6 +178,7 @@ const updateChaosService = async({
         throw new ApiError(404, `Rule "${ruleType}" not found in this scope`)
     }
 
+    await synchronizeChaosCache(projectId, endpointId);
     return updated;
 }
 
@@ -221,9 +200,7 @@ const setEnabled = async({
         throw new ApiError(404, "ruletype not found in this scope");
     }
 
-    // sync updated rules array back to Redis immediately
-    // so MockServer sees the change without waiting for TTL expiry
-    await saveChaosRuleToRedis(projectId, endpointId, updated.rules);
+    await synchronizeChaosCache(projectId, endpointId);
 
     return updated;
 }
@@ -259,17 +236,11 @@ const deleteChaosService = async({projectId, endpointId = null, ruleType}) => {
     }
 
     if(updated.rules && updated.rules.length === 0){
-        // no rules left — delete the whole RuleSet doc and clear the cache key
+        // no rules left — delete the whole RuleSet document.
         await ChaosRuleSet.deleteOne({_id : updated._id});
-        await redisClient.del(getChaosRuleCacheKey(projectId, endpointId));
-    } else {
-        // rules remain — update cache with the pruned array
-        await saveChaosRuleToRedis(projectId, endpointId, updated.rules);
     }
-    
-    // Invalidate project-wide "all" cache so it re-fetches on next read
-    const PROJECT_ALL_KEY = `chaos:rules:project:${projectId}:all`;
-    await redisClient.del(PROJECT_ALL_KEY);
+
+    await synchronizeChaosCache(projectId, endpointId);
 
     return updated;
 }
@@ -280,28 +251,12 @@ const getChaosRulesService = async ({ projectId, endpointId = null }) => {
         ? new mongoose.Types.ObjectId(endpointId)
         : null;
 
-    // Try Redis cache first
-    const cacheKey = getChaosRuleCacheKey(projectId, endpointId);
-    const cached = await redisClient.get(cacheKey);
-    if (cached) {
-        try {
-            const parsed = JSON.parse(cached);
-            if (Array.isArray(parsed)) return parsed;
-        } catch {
-            // fall through to Mongo
-        }
-    }
-
     const ruleSet = await ChaosRuleSet.findOne({
         projectId: normalizedProjectId,
         endpointId: normalizedEndpointId,
     }).lean();
 
     const rules = ruleSet?.rules ?? [];
-
-    if (rules.length > 0) {
-        await saveChaosRuleToRedis(projectId, endpointId, rules);
-    }
 
     return rules;
 };
@@ -310,22 +265,10 @@ const getChaosRulesService = async ({ projectId, endpointId = null }) => {
  * Fetch ALL rule sets for a project in a single query.
  * Returns an array of { endpointId, rules } — one entry per scope.
  * endpointId is null for project-level rules.
- * Uses a project-wide Redis cache key so the whole result is one cache read.
+ * Dashboard reads MongoDB directly; the separate Redis runtime cache is owned
+ * by MockServer and is never populated with dashboard-only response shapes.
  */
 const getAllProjectChaosRulesService = async ({ projectId }) => {
-    const PROJECT_ALL_KEY = `chaos:rules:project:${projectId}:all`;
-
-    // Single cache read
-    const cached = await redisClient.get(PROJECT_ALL_KEY);
-    if (cached) {
-        try {
-            const parsed = JSON.parse(cached);
-            if (Array.isArray(parsed)) return parsed;
-        } catch {
-            // fall through to Mongo
-        }
-    }
-
     // Single Mongo query — fetches every scope for this project at once
     const ruleSets = await ChaosRuleSet.find({
         projectId: new mongoose.Types.ObjectId(projectId),
@@ -335,14 +278,6 @@ const getAllProjectChaosRulesService = async ({ projectId }) => {
         endpointId: rs.endpointId ? String(rs.endpointId) : null,
         rules: rs.rules ?? [],
     }));
-
-    // Cache for same TTL
-    await redisClient.set(
-        PROJECT_ALL_KEY,
-        JSON.stringify(result),
-        "EX",
-        CHAOS_RULE_CACHE_TTL
-    );
 
     return result;
 };

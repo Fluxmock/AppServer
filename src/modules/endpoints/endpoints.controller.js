@@ -1,6 +1,7 @@
 import asyncHandler from "../../utils/asyncHandler.js";
 import ApiError from "../../utils/ApiError.js";
 import ApiResponse from "../../utils/ApiResponse.js";
+import { emitProjectConfigChange } from "../../config/socket.js";
 import { 
   configureEndpointService, 
   updateEndpointService,
@@ -38,6 +39,7 @@ const configureEndpoint = asyncHandler(async (req, res) => {
     responseBodyTemplate,
     isActive,
   });
+  emitProjectConfigChange(projectId, { type: "endpoint", operation: "upsert", endpoint });
 
   return res.status(200).json(
     new ApiResponse(200, endpoint, "Endpoint configured successfully")
@@ -58,6 +60,7 @@ const updateEndpoint = asyncHandler(async (req, res) => {
     endpointId,
     payload,
   });
+  emitProjectConfigChange(projectId, { type: "endpoint", operation: "upsert", endpoint });
 
   return res.status(200).json(
     new ApiResponse(200, endpoint, "Endpoint updated successfully")
@@ -72,6 +75,7 @@ const deleteEndpoint = asyncHandler(async(req, res) => {
   }
 
   const deletedEndpoint = await deleteEndpointService(projectId, endpointId);
+  emitProjectConfigChange(projectId, { type: "endpoint", operation: "delete", endpointId });
   
   return res.status(200)
     .json(new ApiResponse(200, deletedEndpoint, "Endpoint deleted successfully!"));
@@ -86,6 +90,7 @@ const activateEndpoint = asyncHandler(async(req, res) => {
     }
 
     const endpoint = await activateEndpointService(projectId, endpointId);
+    emitProjectConfigChange(projectId, { type: "endpoint", operation: "upsert", endpoint });
 
     return res.status(200).json(
       new ApiResponse(200, endpoint, "endpoint activated successfully!")
@@ -100,6 +105,7 @@ const deactivateEndpoint = asyncHandler(async(req, res) => {
     }
 
     const endpoint = await deactivateEndpointService(projectId, endpointId);
+    emitProjectConfigChange(projectId, { type: "endpoint", operation: "upsert", endpoint });
 
     return res.status(200).json(
       new ApiResponse(200, endpoint, "endpoint deactivated successfully!")

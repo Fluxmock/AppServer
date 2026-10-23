@@ -1,6 +1,7 @@
 import asyncHandler from "../../utils/asyncHandler.js";
 import ApiError from "../../utils/ApiError.js";
 import ApiResponse from "../../utils/ApiResponse.js";
+import { emitProjectConfigChange } from "../../config/socket.js";
 //configure chaos for a 
 
 import { 
@@ -37,6 +38,7 @@ const createChaos = asyncHandler(async (req, res) => {
     }
 
     const rule = await createChaosService({ projectId, endpointId, ruleType, probability, config, isEnabled });
+    emitProjectConfigChange(projectId, { type: "chaos", operation: "upsert", endpointId, ruleSet: rule });
     res.status(201).json(new ApiResponse(201, rule, "Chaos created successfully!"));
  
 });
@@ -59,6 +61,7 @@ const upsertRule = asyncHandler(async (req, res) => {
     }
 
     const doc = await upsertRuleService({ projectId, endpointId, ruleType, probability, config, isEnabled });
+    emitProjectConfigChange(projectId, { type: "chaos", operation: "upsert", endpointId, ruleSet: doc });
     return res.status(200).json(new ApiResponse(200, doc, "Rule upserted successfully"));
 });
 
@@ -83,6 +86,7 @@ const updateChaos = asyncHandler(async (req, res) => {
     }
 
     const rule = await updateChaosService({ projectId, endpointId, ruleType, probability, config, isEnabled });
+    emitProjectConfigChange(projectId, { type: "chaos", operation: "upsert", endpointId, ruleSet: rule });
     res.status(200).json(new ApiResponse(200, rule, "updated successfully!"));
 });
 
@@ -94,6 +98,7 @@ const deleteChaos = asyncHandler(async(req, res) => {
     if (!ruleType || typeof ruleType !== "string") throw new ApiError(400, "ruleType is required in params and must be a string");
 
     const rule = await deleteChaosService({ projectId, endpointId, ruleType });
+    emitProjectConfigChange(projectId, { type: "chaos", operation: "upsert", endpointId, ruleSet: rule });
     res.status(200).json(new ApiResponse(200, rule, "deleted Successfully!"));
 });
 
@@ -105,6 +110,7 @@ const activateChaos = asyncHandler(async(req, res) => {
     if (!ruleType || typeof ruleType !== "string") throw new ApiError(400, "ruleType is required in params and must be a string");
 
     const rule = await activateChaosService({ projectId, endpointId, ruleType });
+    emitProjectConfigChange(projectId, { type: "chaos", operation: "upsert", endpointId, ruleSet: rule });
     res.status(200).json(new ApiResponse(200, rule, "activated successfully"));
 })
 
@@ -116,6 +122,7 @@ const deactivateChaos = asyncHandler(async(req , res) => {
     if (!ruleType || typeof ruleType !== "string") throw new ApiError(400, "ruleType is required in params and must be a string");
 
     const rule = await deactivateChaosService({ projectId, endpointId, ruleType });
+    emitProjectConfigChange(projectId, { type: "chaos", operation: "upsert", endpointId, ruleSet: rule });
     res.status(200).json(new ApiResponse(200, rule, "deactivated successfully"));
 })
 

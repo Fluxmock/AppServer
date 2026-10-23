@@ -1,9 +1,8 @@
 import Endpoint from "../../models/Endpoint.js";
 import { Project } from "../../models/Project.js";
 import ChaosRuleSet from "../../models/ChaosRule.js";
-import redisClient from "../../config/redis.js";
 import ApiError from "../../utils/ApiError.js";
-import asyncHandler from "../../utils/asyncHandler.js";
+import { invalidateChaosCache, invalidateEndpointCache } from "../../services/runtimeCache.service.js";
 
 //updateEndpoints
 //deleteEndpoints
@@ -12,126 +11,10 @@ import asyncHandler from "../../utils/asyncHandler.js";
 //usePresets in endpoints
 
 
-const saveEndpointToRedis = async (projectId, endpoint) => {
-  //projectId --> which project this endpoint belongs to
-  //endpoint --> the endpoint document/object you want to cache
-  const endpointObj = endpoint.toObject ? endpoint.toObject() : endpoint;
-  //convert mongoose document into a normal javascript object
-  const projectKey = `project:endpoints:${projectId}`; //redis key
-  const endpointKey = `endpoint:${endpointObj._id}`;
-  
-  //if it exists i.e the project then it returns the value
-  const cached = await redisClient.get(projectKey);
-  let endpoints = []; //if the key doesnt exists i.e cached == null
-  //so start with new
-
-  if (cached) {
-    try {
-      const parsed = JSON.parse(cached); //convert redis string back to js
-      endpoints = Array.isArray(parsed) ? parsed : []; //the new endpoint is now the normal javascript array
-    } catch (error) {
-      endpoints = [];
-    }
-  }
-  
-  //check whether the endpoint already exists
-  //does this endpoint ecists in the project cached endpoint list?
-  const existingIndex = endpoints.findIndex(
-    (item) => String(item._id || item.id) === String(endpointObj._id)
-  );
-  //returns the index number is the cached endpoint is found else returns -1
-
-  if (existingIndex >= 0) {
-    //when the cached endpoint is found --> during updation
-    //update the exsiting endpoint with the new endpoint
-    endpoints[existingIndex] = endpointObj;
-  } else {
-    //push new endpoint in the endpoint array
-    endpoints.push(endpointObj);
-  }
-
-  //save the individual endpoint
-  await redisClient.set(endpointKey, JSON.stringify(endpointObj));
-  //save the projects complete endpoint list
-  await redisClient.set(projectKey, JSON.stringify(endpoints));
-
-  console.log("redis working!")
-};
-
-const deleteEndpointFromRedis = async (projectId, endpointId) => {
-   const projectKey = `project:endpoints:${projectId}`;
-   const endpointKey = `endpoint:${endpointId}`;
-
-   const cached = await redisClient.get(projectKey);
-
-   if(!cached){
-    await redisClient.del(endpointKey);
-    return;
-   }
-
-   let endpoints = [];
-   try{
-    endpoints = JSON.parse(cached);
-   }catch{
-    endpoints = [];
-   }
-
-   const filtered = endpoints.filter(
-    (item) => String(item._id || item.id) !== String(endpointId)
-  );
-
-  await redisClient.del(endpointKey);
-
-  if(filtered.length == 0){
-    //idk if we should delete the project if there is no endpoint
-    await redisClient.del(projectKey);
-    return;
-  }
-
-  await redisClient.set(projectKey, JSON.stringify(filtered));
-
-  console.log("endpoint deleted successfully from REDIS!")
-};
-
-const toggleEndpointStatusInRedis = async(projectId, endpointId, isActive) => {
-   const projectKey = `project:endpoints:${projectId}`;
-   const endpointKey = `endpoint:${endpointId}`;
-
-   const cachedProject = await redisClient.get(projectKey);
-
-   if(!cachedProject){
-     const cachedEndpoint = await redisClient.get(endpointKey);
-     if(cachedEndpoint){
-      const endpoint = JSON.parse(cachedEndpoint);
-      endpoint.isActive = isActive;
-      await redisClient.set(endpointKey, JSON.stringify(endpoint));
-     }
-     return;
-   }
-
-   let endpoints = [];
-   try{
-    endpoints = JSON.parse(cachedProject);
-   }catch{
-    endpoints = [];
-   }
-
-   const index = endpoints.findIndex(
-    (item) => String(item._id || item.id) === String(endpointId)
-   );
-
-   if(index >= 0){
-    endpoints[index].isActive = isActive;
-    await redisClient.set(projectKey, JSON.stringify(endpoints));
-   }
-
-   const cachedEndpoint = await redisClient.get(endpointKey);
-   if(cachedEndpoint){
-    const endpoint = JSON.parse(cachedEndpoint);
-    endpoint.isActive = isActive;
-    await redisClient.set(endpointKey, JSON.stringify(endpoint));
-   }
-}
+// Endpoint cache mutations are invalidation-only. Updating an array in Redis
+// with read/modify/write loses concurrent writes; MockServer rebuilds the list
+// from MongoDB under a version guard on the next request instead.
+const synchronizeEndpointCache = (projectId) => invalidateEndpointCache(projectId);
 
 const getAllEndpointsService = async (projectId, userId) => {
   if (!projectId) {
@@ -167,12 +50,6 @@ const getAllEndpointsService = async (projectId, userId) => {
     ...ep,
     chaosRulesCount: chaosCountMap.get(String(ep._id)) ?? 0,
   }));
-
-  // Refresh the cache with enriched data
-  await redisClient.set(
-    `project:endpoints:${projectId}`,
-    JSON.stringify(enriched)
-  );
 
   return enriched;
 };
@@ -229,7 +106,7 @@ const configureEndpointService = async ({
     });
   }
 
-  await saveEndpointToRedis(projectId, endpoint);
+  await synchronizeEndpointCache(projectId);
 
   return endpoint;
 };
@@ -317,7 +194,7 @@ const updateEndpointService = async ({
     throw new ApiError(500, "Failed to update endpoint");
   }
 
-  await saveEndpointToRedis(projectId, updatedEndpoint);
+  await synchronizeEndpointCache(projectId);
 
   return updatedEndpoint;
 };
@@ -332,9 +209,9 @@ const deleteEndpointService = async(projectId, endpointId) => {
     throw new ApiError("404", "Endpoint not found or not authorized!");
    }
 
-   if(endpoint){
-    await deleteEndpointFromRedis(projectId, endpointId);
-   }
+   await ChaosRuleSet.deleteMany({ projectId, endpointId });
+   await synchronizeEndpointCache(projectId);
+   await invalidateChaosCache(projectId, endpointId);
 
    return endpoint
 }
@@ -350,7 +227,7 @@ const activateEndpointService = async(projectId, endpointId) => {
       throw new ApiError(404, "Endpoint not found or not authorized!");
      }
 
-     await toggleEndpointStatusInRedis(projectId, endpointId, endpoint.isActive);
+     await synchronizeEndpointCache(projectId);
 
      return endpoint;
 }
@@ -366,7 +243,7 @@ const deactivateEndpointService = async(projectId, endpointId) => {
       throw new ApiError(404, "Endpoint not found or not authorized!");
      }
 
-     await toggleEndpointStatusInRedis(projectId, endpointId, endpoint.isActive);
+     await synchronizeEndpointCache(projectId);
 
      return endpoint;
 }

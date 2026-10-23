@@ -5,7 +5,7 @@ import redisClient from "../../config/redis.js";
 import crypto from "crypto";
 import Endpoint from "../../models/Endpoint.js";
 import ChaosRuleSet from "../../models/ChaosRule.js";
-import { profileEnd } from "console";
+import { invalidateProjectCache, removeProjectRuntimeCaches } from "../../services/runtimeCache.service.js";
 
 const generateProjectKey = () => {
   return "pk_" + crypto.randomBytes(16).toString("hex");
@@ -48,8 +48,20 @@ const projectDeleteService = async(projectId, userId) => {
         throw new ApiError(404, "Project not found or not authorized");
     }
 
-    // evict from MockServer cache so deleted project stops serving requests immediately
-    await redisClient.del(`project:key:${project.projectKey}`);
+    // Endpoint and chaos documents are private configuration owned by this
+    // project. Capture endpoint ids before deleting them so their scoped cache
+    // keys can be removed without unsafe key scanning.
+    const endpoints = await Endpoint.find({ projectId: project._id }, "_id").lean();
+    const endpointIds = endpoints.map((endpoint) => String(endpoint._id));
+
+    // Idempotent cache cleanup is retried by the cache service if Redis is
+    // unavailable. Project-key removal happens after the durable deletion.
+    await removeProjectRuntimeCaches(String(project._id), [project.projectKey], endpointIds);
+
+    await Promise.all([
+        Endpoint.deleteMany({ projectId: project._id }),
+        ChaosRuleSet.deleteMany({ projectId: project._id }),
+    ]);
 
     return project;
 }
@@ -75,8 +87,7 @@ const activateProjectService = async(projectId, userId) => {
     project.isActive = true;
     await project.save();
 
-    // invalidate MockServer cache so the change reflects immediately
-    await redisClient.del(`project:key:${project.projectKey}`);
+    await invalidateProjectCache(String(project._id), [project.projectKey]);
 
     return project;
 }
@@ -96,8 +107,7 @@ const deactivateProjectService = async(projectId, userId)=>{
     project.isActive = false;
     await project.save();
 
-    // invalidate MockServer cache so the change reflects immediately
-    await redisClient.del(`project:key:${project.projectKey}`);
+    await invalidateProjectCache(String(project._id), [project.projectKey]);
 
     return project;
 }
