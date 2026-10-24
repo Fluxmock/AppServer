@@ -3,6 +3,7 @@ import Redis from "ioredis";
 import jwt from "jsonwebtoken";
 import { User } from "../models/User.js";
 import { Project } from "../models/Project.js";
+import redisClient from "./redis.js";
 
 let io;
 
@@ -52,6 +53,21 @@ export function initSocket(httpServer) {
                 console.log(`[ws] joined room → project:${projectId} (socketId:${socket.id})`);
                 // Acknowledge so the frontend knows it's live
                 socket.emit("joined:project", { projectId });
+                // Pub/sub only reaches browsers already in the room. Recover
+                // recent requests after initial navigation and reconnects.
+                try {
+                    const entries = await redisClient.lrange(`project:${projectId}:request-history`, 0, 4999);
+                    const logs = entries.flatMap((entry) => {
+                        try {
+                            const log = JSON.parse(entry);
+                            return log.projectId === projectId && Date.parse(log.timestamp) >= Date.now() - 900_000 ? [log] : [];
+                        } catch { return []; }
+                    });
+                    socket.emit("request:history", { projectId, logs });
+                } catch (error) {
+                    console.error("[ws] request history unavailable:", error.message);
+                    socket.emit("request:history-error", { projectId, message: "Recent requests could not be loaded. Live streaming is still available." });
+                }
             } catch {
                 socket.emit("project:join-error", { projectId, message: "Not authorized for this project" });
             }

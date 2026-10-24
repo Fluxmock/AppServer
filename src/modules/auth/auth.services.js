@@ -31,17 +31,17 @@ const signupUserService = async ({ username, email, password, avatar }) => {
 
 const loginUserService = async ({ email, password }) => {
     if (!email || !password) {
-        throw new ApiError(400, "Email and password are required");
+        throw new ApiError(401, "Invalid email or password");
     }
 
     const user = await User.findOne({ email });
     if (!user) {
-        throw new ApiError(401, "Invalid credentials");
+        throw new ApiError(401, "Invalid email or password");
     }
 
     const isPasswordValid = await user.isPasswordCorrect(password);
     if (!isPasswordValid) {
-        throw new ApiError(401, "Invalid credentials");
+        throw new ApiError(401, "Invalid email or password");
     }
 
     const accessToken = user.generateAccessToken();

@@ -19,6 +19,7 @@ export const runtimeCacheKeys = {
       ? `cache:version:chaos:${projectId}:endpoint:${endpointId}`
       : `cache:version:chaos:${projectId}`,
   chaosAll: (projectId) => `chaos:rules:project:${projectId}:all`,
+  requestEvents: (projectId) => `project:${projectId}:request-events:24h`,
 };
 
 const RETRY_DELAYS_MS = [1_000, 5_000, 30_000];
@@ -70,6 +71,7 @@ export function invalidateChaosCache(projectId, endpointId = null) {
 export function invalidateProjectCache(projectId, projectKeys = []) {
   return runCacheSync(`invalidate project ${projectId}`, async () => {
     const tx = redisClient.multi()
+      .del(`project:${projectId}:request-history`)
       .del(runtimeCacheKeys.endpoints(projectId))
       .incr(runtimeCacheKeys.endpointsVersion(projectId))
       .del(runtimeCacheKeys.chaos(projectId))
@@ -90,6 +92,8 @@ export function invalidateProjectCache(projectId, projectKeys = []) {
 export function removeProjectRuntimeCaches(projectId, projectKeys = [], endpointIds = []) {
   return runCacheSync(`remove runtime cache for project ${projectId}`, async () => {
     const tx = redisClient.multi()
+      .del(`project:${projectId}:request-history`)
+      .del(runtimeCacheKeys.requestEvents(projectId))
       .del(runtimeCacheKeys.endpoints(projectId))
       .del(runtimeCacheKeys.endpointsVersion(projectId))
       .del(runtimeCacheKeys.chaos(projectId))

@@ -136,10 +136,27 @@ const getEndpointCountService = async(userId) => {
 
     const countMap = new Map(counts.map((c) => [String(c._id), c.count]));
 
-    return projects.map((p) => ({
-    ...p,
-    endpointCount: countMap.get(String(p._id)) ?? 0,
-  }));
+    const since = Date.now() - (24 * 60 * 60 * 1000);
+    const requestCounts = await Promise.all(
+        projects.map(async (project) => {
+            try {
+                return await redisClient.zcount(
+                    `project:${project._id}:request-events:24h`,
+                    since,
+                    "+inf"
+                );
+            } catch (error) {
+                console.error("Failed to fetch project request count from Redis:", error);
+                return 0;
+            }
+        })
+    );
+
+    return projects.map((p, index) => ({
+        ...p,
+        endpointCount: countMap.get(String(p._id)) ?? 0,
+        requestsToday: requestCounts[index] ?? 0,
+    }));
 };
 
 const getAllActiveProjectService = async(userId) => {
@@ -203,12 +220,17 @@ const getProjectByIdService = async(projectId, userId) => {
         ? (totalProbability / enabledRulesCount) 
         : 0;
 
-    // Get request count for last 24 hours from Redis
-    // Key format: project:<projectId>:requests:count:24h
+    // MockServer writes one unique event per resolved endpoint request. A
+    // sorted set lets this remain an exact rolling 24-hour number rather than
+    // a counter that resets 24 hours after its first request.
     let requestsToday = 0;
     try {
-        const countStr = await redisClient.get(`project:${projectId}:requests:count:24h`);
-        requestsToday = countStr ? parseInt(countStr, 10) : 0;
+        const since = Date.now() - (24 * 60 * 60 * 1000);
+        requestsToday = await redisClient.zcount(
+            `project:${projectId}:request-events:24h`,
+            since,
+            "+inf"
+        );
     } catch (err) {
         console.error("Failed to fetch request count from Redis:", err);
     }
