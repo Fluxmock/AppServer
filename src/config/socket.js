@@ -3,6 +3,7 @@ import Redis from "ioredis";
 import jwt from "jsonwebtoken";
 import { User } from "../models/User.js";
 import { Project } from "../models/Project.js";
+import { RequestLog } from "../models/index.js";
 import redisClient from "./redis.js";
 
 let io;
@@ -124,6 +125,20 @@ export function initSocket(httpServer) {
 
         // Forward to every browser socket sitting in this project room
         io.to(`project:${projectId}`).emit("request:log", logEvent);
+
+        // Persist for historical analytics queries (fire-and-forget —
+        // never delay the socket emit for a DB write)
+        RequestLog.create({
+            projectId:    logEvent.projectId,
+            endpointId:   logEvent.endpointId || null,
+            method:       logEvent.method,
+            path:         logEvent.path,
+            statusCode:   logEvent.statusCode,
+            responseTime: logEvent.responseTime,
+            chaosApplied: logEvent.chaosApplied ?? false,
+            chaosRules:   logEvent.chaosRules   ?? [],
+            timestamp:    new Date(logEvent.timestamp),
+        }).catch((err) => console.error("[ws] RequestLog write failed:", err.message));
 
         console.log(
             `[ws] forwarded → room:project:${projectId}`,

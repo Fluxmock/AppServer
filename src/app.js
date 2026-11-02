@@ -5,6 +5,7 @@ import authRouter from "./modules/auth/index.js"
 import projectRouter from "./modules/projects/index.js"
 import endpointRouter from "./modules/endpoints/index.js"
 import chaosRouter from "./modules/chaosRules/index.js"
+import { analyticsRouter } from "./modules/analytics/index.js"
 
 const app = express();
 
@@ -23,6 +24,7 @@ app.use("/api/v1/auth", authRouter);
 app.use("/api/v1/project", projectRouter);
 app.use("/api/v1/endpoint", endpointRouter);
 app.use("/api/v1/chaos", chaosRouter);
+app.use("/api/v1/analytics", analyticsRouter);
 
 export default app;
 
