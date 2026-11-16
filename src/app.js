@@ -26,6 +26,20 @@ app.use("/api/v1/endpoint", endpointRouter);
 app.use("/api/v1/chaos", chaosRouter);
 app.use("/api/v1/analytics", analyticsRouter);
 
+// Global error handling middleware - must be last
+app.use((err, req, res, next) => {
+    const statusCode = err.statusCode || 500;
+    const message = err.message || "Internal Server Error";
+    
+    res.status(statusCode).json({
+        success: false,
+        statusCode,
+        message,
+        errors: err.errors || [],
+        stack: process.env.NODE_ENV === "development" ? err.stack : undefined
+    });
+});
+
 export default app;
 
 //why separate app and server --> app.js = how is my application configured, server.js = 
