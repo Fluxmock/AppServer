@@ -8,6 +8,7 @@ import {
     searchRequestLogs,
     getLogFilterOptions,
     getLogsHistogram,
+    getChaosImpact,
 } from "./analytics.controller.js";
 import { verifyJWT } from "../../middlewares/auth.middleware.js";
 
@@ -16,6 +17,7 @@ const router = Router();
 router.use(verifyJWT);
 
 router.get("/:projectId/overview", getOverview);
+router.get("/:projectId/chaos-impact", getChaosImpact);
 router.get("/:projectId/latency", getLatency);
 router.get("/:projectId/errors", getErrors);
 router.get("/:projectId/error-logs", getErrorLogs);

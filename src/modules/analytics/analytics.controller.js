@@ -6,6 +6,14 @@ import { getLatencyAnalytics } from "./latency.service.js";
 import { getErrorsAnalytics, getRecentErrorLogs } from "./errors.service.js";
 import { getEndpointHealthData } from "./endpointHealth.service.js";
 import { searchLogs, getFilterOptions, getLogHistogram } from "./logSearch.service.js";
+import { getChaosImpactData } from "./chaosImpact.service.js";
+
+export const getChaosImpact = asyncHandler(async (req, res) => {
+    const range = req.query.range ?? "24h";
+    if (typeof range !== "string") throw new ApiError(400, "range must be a string");
+    const data = await getChaosImpactData(req.params.projectId, req.user._id, range);
+    return res.status(200).json(new ApiResponse(200, data, "Chaos impact fetched successfully"));
+});
 
 const VALID_RANGES = new Set(["24h", "7d", "30d"]);
 
