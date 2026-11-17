@@ -11,10 +11,12 @@ import {
     getChaosImpact,
 } from "./analytics.controller.js";
 import { verifyJWT } from "../../middlewares/auth.middleware.js";
+import requireProjectOwner from "../../middlewares/projectOwner.middleware.js";
 
 const router = Router();
 
 router.use(verifyJWT);
+router.param("projectId", requireProjectOwner);
 
 router.get("/:projectId/overview", getOverview);
 router.get("/:projectId/chaos-impact", getChaosImpact);
